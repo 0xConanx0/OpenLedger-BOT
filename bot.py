@@ -1,8 +1,7 @@
 from aiohttp import (
     ClientResponseError,
     ClientSession,
-    ClientTimeout,
-    WSMessage
+    ClientTimeout
 )
 from aiohttp_socks import ProxyConnector
 from colorama import *
@@ -27,6 +26,7 @@ class OepnLedger:
         self.extension_id = "chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc"
         self.proxies = []
         self.proxy_index = 0
+        self.account_proxies = {}
 
     def clear_terminal(self):
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -53,95 +53,107 @@ class OepnLedger:
         minutes, seconds = divmod(remainder, 60)
         return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
     
-    async def load_auto_proxies(self):
-        url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt"
+    async def load_proxies(self, use_proxy_choice: int):
+        filename = "proxy.txt"
         try:
-            async with ClientSession(timeout=ClientTimeout(total=20)) as session:
-                async with session.get(url=url) as response:
-                    response.raise_for_status()
-                    content = await response.text()
-                    with open('proxy.txt', 'w') as f:
-                        f.write(content)
-
-                    self.proxies = content.splitlines()
-                    if not self.proxies:
-                        self.log(f"{Fore.RED + Style.BRIGHT}No proxies found in the downloaded list!{Style.RESET_ALL}")
-                        return
-                    
-                    self.log(f"{Fore.GREEN + Style.BRIGHT}Proxies successfully downloaded.{Style.RESET_ALL}")
-                    self.log(f"{Fore.YELLOW + Style.BRIGHT}Loaded {len(self.proxies)} proxies.{Style.RESET_ALL}")
-                    self.log(f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"*75)
-                    await asyncio.sleep(3)
-        except Exception as e:
-            self.log(f"{Fore.RED + Style.BRIGHT}Failed to load proxies: {e}{Style.RESET_ALL}")
-            return []
-        
-    async def load_manual_proxy(self):
-        try:
-            if not os.path.exists('manual_proxy.txt'):
-                print(f"{Fore.RED + Style.BRIGHT}Proxy file 'manual_proxy.txt' not found!{Style.RESET_ALL}")
+            if use_proxy_choice == 1:
+                async with ClientSession(timeout=ClientTimeout(total=30)) as session:
+                    async with session.get("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt") as response:
+                        response.raise_for_status()
+                        content = await response.text()
+                        with open(filename, 'w') as f:
+                            f.write(content)
+                        self.proxies = content.splitlines()
+            else:
+                if not os.path.exists(filename):
+                    self.log(f"{Fore.RED + Style.BRIGHT}File {filename} Not Found.{Style.RESET_ALL}")
+                    return
+                with open(filename, 'r') as f:
+                    self.proxies = f.read().splitlines()
+            
+            if not self.proxies:
+                self.log(f"{Fore.RED + Style.BRIGHT}No Proxies Found.{Style.RESET_ALL}")
                 return
 
-            with open('manual_proxy.txt', "r") as f:
-                proxies = f.read().splitlines()
-
-            self.proxies = proxies
-            self.log(f"{Fore.YELLOW + Style.BRIGHT}Loaded {len(self.proxies)} proxies.{Style.RESET_ALL}")
-            self.log(f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"*75)
-            await asyncio.sleep(3)
+            self.log(
+                f"{Fore.GREEN + Style.BRIGHT}Proxies Total  : {Style.RESET_ALL}"
+                f"{Fore.WHITE + Style.BRIGHT}{len(self.proxies)}{Style.RESET_ALL}"
+            )
+        
         except Exception as e:
-            print(f"{Fore.RED + Style.BRIGHT}Failed to load manual proxies: {e}{Style.RESET_ALL}")
+            self.log(f"{Fore.RED + Style.BRIGHT}Failed To Load Proxies: {e}{Style.RESET_ALL}")
             self.proxies = []
 
     def check_proxy_schemes(self, proxies):
         schemes = ["http://", "https://", "socks4://", "socks5://"]
         if any(proxies.startswith(scheme) for scheme in schemes):
             return proxies
-        
-        return f"http://{proxies}" # Change with yours proxy schemes if your proxy not have schemes [http:// or socks5://]
+        return f"http://{proxies}"
 
-    def get_next_proxy(self):
+    def get_next_proxy_for_account(self, account):
+        if account not in self.account_proxies:
+            if not self.proxies:
+                return None
+            proxy = self.check_proxy_schemes(self.proxies[self.proxy_index])
+            self.account_proxies[account] = proxy
+            self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
+        return self.account_proxies[account]
+
+    def rotate_proxy_for_account(self, account):
         if not self.proxies:
-            self.log(f"{Fore.RED + Style.BRIGHT}No proxies available!{Style.RESET_ALL}")
             return None
-
-        proxy = self.proxies[self.proxy_index]
+        proxy = self.check_proxy_schemes(self.proxies[self.proxy_index])
+        self.account_proxies[account] = proxy
         self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
-        return self.check_proxy_schemes(proxy)
+        return proxy
     
-    def generate_id(self):
-        return str(uuid.uuid4())
+    def generate_random_id(self):
+        random_id = str(uuid.uuid4())
+        return random_id
         
     def generate_worker_id(self, account: str):
         identity = base64.b64encode(account.encode("utf-8")).decode("utf-8")
         return identity
-        
-    def hide_account(self, account: str):
-        hide_account = account[:6] + '*' * 6 + account[-6:]
-        return hide_account
-        
-    async def renew_token(self, account: str, proxy=None):
-        token = await self.generate_token(account, proxy)
-        if not token:
-            self.log(
-                f"{Fore.CYAN + Style.BRIGHT}[ Account{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.RED + Style.BRIGHT} Failed to Renew Access Token {Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT}]{Style.RESET_ALL}"
-            )
-            return
-        
+    
+    def mask_account(self, account):
+        mask_account = account[:6] + '*' * 6 + account[-6:]
+        return mask_account
+
+    def print_message(self, account, proxy, color, message):
         self.log(
-            f"{Fore.CYAN + Style.BRIGHT}[ Account{Style.RESET_ALL}"
-            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
+            f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
+            f"{Fore.WHITE + Style.BRIGHT} {self.mask_account(account)} {Style.RESET_ALL}"
             f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-            f"{Fore.GREEN + Style.BRIGHT} Access Token Has Been Renewed {Style.RESET_ALL}"
+            f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
+            f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
+            f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
+            f"{Fore.CYAN + Style.BRIGHT}Status:{Style.RESET_ALL}"
+            f"{color + Style.BRIGHT} {message} {Style.RESET_ALL}"
             f"{Fore.CYAN + Style.BRIGHT}]{Style.RESET_ALL}"
         )
-        return token
-    
-    async def generate_token(self, account: str, proxy=None, retries=5):
+
+    def print_question(self):
+        while True:
+            try:
+                print("1. Run With Monosans Proxy")
+                print("2. Run With Private Proxy")
+                print("3. Run Without Proxy")
+                choose = int(input("Choose [1/2/3] -> ").strip())
+
+                if choose in [1, 2, 3]:
+                    proxy_type = (
+                        "Run With Monosans Proxy" if choose == 1 else 
+                        "Run With Private Proxy" if choose == 2 else 
+                        "Run Without Proxy"
+                    )
+                    print(f"{Fore.GREEN + Style.BRIGHT}{proxy_type} Selected.{Style.RESET_ALL}")
+                    return choose
+                else:
+                    print(f"{Fore.RED + Style.BRIGHT}Please enter either 1, 2 or 3.{Style.RESET_ALL}")
+            except ValueError:
+                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2 or 3).{Style.RESET_ALL}")
+
+    async def generate_token(self, account: str, proxy=None):
         url = "https://apitn.openledger.xyz/api/v1/auth/generate_token"
         data = json.dumps({"address":account})
         headers = {
@@ -150,21 +162,17 @@ class OepnLedger:
             "Content-Type": "application/json"
 
         }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data']['token']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    return None
-                
-    async def user_reward(self, account: str, token: str, proxy=None, retries=5):
+        connector = ProxyConnector.from_url(proxy) if proxy else None
+        try:
+            async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                async with session.post(url=url, headers=headers, data=data) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    return result['data']['token']
+        except (Exception, ClientResponseError) as e:
+            return self.print_message(account, proxy, Fore.RED, f"GET Access Token Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
+        
+    async def user_reward(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/reward"
         headers = {
             **self.headers,
@@ -178,20 +186,21 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.renew_token(account, proxy)
+                            token = await self.get_access_token(account, use_proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
 
                         response.raise_for_status()
                         result = await response.json()
-                        return result['data']['totalPoint']
+                        return result['data']
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    return None
+                    await asyncio.sleep(5)
+                    continue
                 
-    async def worker_reward(self, account: str, token: str, proxy=None, retries=5):
+                return self.print_message(account, proxy, Fore.RED, f"GET User Reward Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
+                
+    async def worker_reward(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/worker_reward"
         headers = {
             **self.headers,
@@ -205,20 +214,21 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.renew_token(account, proxy)
+                            token = await self.get_access_token(account, use_proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
 
                         response.raise_for_status()
                         result = await response.json()
-                        return result['data'][0]['heartbeat_count']
+                        return result['data'][0]['point']
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    return None
+                    await asyncio.sleep(5)
+                    continue
+                
+                return self.print_message(account, proxy, Fore.RED, f"GET Total Heartbeat Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
 
-    async def realtime_reward(self, account: str, token: str, proxy=None, retries=5):
+    async def realtime_reward(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/reward_realtime"
         headers = {
             **self.headers,
@@ -232,7 +242,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.renew_token(account, proxy)
+                            token = await self.get_access_token(account, use_proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
 
@@ -241,11 +251,12 @@ class OepnLedger:
                         return result['data'][0]['total_heartbeats']
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    return None
+                    await asyncio.sleep(5)
+                    continue
+                
+                return self.print_message(account, proxy, Fore.RED, f"GET Today Heartbeat Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
     
-    async def checkin_details(self, account: str, token: str, proxy=None, retries=5):
+    async def checkin_details(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/claim_details"
         headers = {
             **self.headers,
@@ -259,7 +270,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.renew_token(account, proxy)
+                            token = await self.get_access_token(account, use_proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         
@@ -268,11 +279,12 @@ class OepnLedger:
                         return result['data']
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    return None
+                    await asyncio.sleep(5)
+                    continue
+                
+                return self.print_message(account, proxy, Fore.RED, f"GET Daily Check-In Data Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
     
-    async def claim_checkin(self, account: str, token: str, proxy=None, retries=5):
+    async def claim_checkin_reward(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/claim_reward"
         headers = {
             **self.headers,
@@ -286,7 +298,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.renew_token(account, proxy)
+                            token = await self.get_access_token(account, use_proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         
@@ -295,11 +307,12 @@ class OepnLedger:
                         return result['data']
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    return None
+                    await asyncio.sleep(5)
+                    continue
+                
+                return self.print_message(account, proxy, Fore.RED, f"Claim Daily Check-In Reward Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
     
-    async def tier_details(self, account: str, token: str, proxy=None, retries=5):
+    async def tier_details(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/tier_details"
         headers = {
             **self.headers,
@@ -313,7 +326,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.renew_token(account, proxy)
+                            token = await self.get_access_token(account, use_proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         
@@ -322,11 +335,12 @@ class OepnLedger:
                         return result['data']['tierDetails']
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    return None
+                    await asyncio.sleep(5)
+                    continue
+                
+                return self.print_message(account, proxy, Fore.RED, f"GET Tier Data Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
     
-    async def claim_tier(self, account: str, token: str, tier_id: int, proxy=None, retries=5):
+    async def claim_tier_reward(self, account: str, token: str, tier_id: int, use_proxy: bool, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/claim_tier"
         data = json.dumps({"tierId":tier_id})
         headers = {
@@ -342,104 +356,91 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.put(url=url, headers=headers, data=data) as response:
                         if response.status == 401:
-                            token = await self.renew_token(account, proxy)
+                            token = await self.get_access_token(account, use_proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         elif response.status == 420:
-                            return None
+                            return {"status":"FAILED"}
                         
                         response.raise_for_status()
                         return await response.json()
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    return None
+                    await asyncio.sleep(5)
+                    continue
                 
-    async def user_earning(self, account: str, token: str, proxy=None):
+                return self.print_message(account, proxy, Fore.RED, f"Claim Tier Reward Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
+            
+    async def process_user_earning(self, account: str, token: str, use_proxy: bool):
         while True:
-            reward = 0
-            heartbeat = 0
-            heartbeat_today = 0
+            proxy = self.get_next_proxy_for_account(account) if use_proxy else None
 
-            user_reward = await self.user_reward(account, token, proxy)
-            if user_reward:
-                reward = float(user_reward)
+            epoch_name = "N/A"
+            user_point = 0
+            total_heartbeat = 0
+            today_heartbeat = 0
 
-            worker_reward = await self.worker_reward(account, token, proxy)
+            user = await self.user_reward(account, token, use_proxy, proxy)
+            if user:
+                epoch_name = user.get('name', 'N/A')
+                user_point = float(user.get('totalPoint', 0))
+            await asyncio.sleep(3)
+
+            worker_reward = await self.worker_reward(account, token, use_proxy, proxy)
             if worker_reward:
-                heartbeat = float(worker_reward)
+                total_heartbeat = float(worker_reward)
+            await asyncio.sleep(3)
 
-            realtime_reward = await self.realtime_reward(account, token, proxy)
+            realtime_reward = await self.realtime_reward(account, token, use_proxy, proxy)
             if realtime_reward:
-                heartbeat_today = float(realtime_reward)
+                today_heartbeat = float(realtime_reward)
+            await asyncio.sleep(3)
 
-            total_point = reward + heartbeat
+            total_earning = user_point + total_heartbeat
+            today_earning = today_heartbeat
 
-            self.log(
-                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Earning: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}Total {total_point} PTS{Style.RESET_ALL}"
+            self.print_message(account, proxy, Fore.WHITE,
+                f"Earning {epoch_name}"
                 f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}Today {heartbeat_today} PTS{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
+                f"{Fore.WHITE + Style.BRIGHT}Today {today_earning} PTS{Style.RESET_ALL}"
+                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
+                f"{Fore.WHITE + Style.BRIGHT}Total {total_earning} PTS{Style.RESET_ALL}"
             )
-            await asyncio.sleep(10 * 60)
+            await asyncio.sleep(15 * 60)
 
-    async def process_checkin(self, account: str, token: str, proxy=None):
+    async def process_claim_checkin_reward(self, account: str, token: str, use_proxy: bool):
         while True:
-            check_in = await self.checkin_details(account, token, proxy)
-            if check_in:
-                if not check_in['claimed']:
-                    claim = await self.claim_checkin(account, token, proxy)
-                    if claim and claim['claimed']:
-                        self.log(
-                            f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
+            proxy = self.get_next_proxy_for_account(account) if use_proxy else None
+            checkin = await self.checkin_details(account, token, use_proxy, proxy)
+            if checkin:
+                is_claimed = checkin['claimed']
+                reward = checkin['dailyPoint']
+
+                if not is_claimed:
+                    claim = await self.claim_checkin_reward(account, token, use_proxy, proxy)
+
+                    if "claimed" in claim and claim['claimed']:
+                        self.print_message(account, proxy, Fore.GREEN,
+                            f"Daily Check-In Reward Is Claimed "
                             f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} Check-In: {Style.RESET_ALL}"
-                            f"{Fore.GREEN + Style.BRIGHT}Is Claimed{Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}Reward:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {check_in['dailyPoint']} PTS {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}]{Style.RESET_ALL}"
+                            f"{Fore.CYAN + Style.BRIGHT} Reward: {Style.RESET_ALL}"
+                            f"{Fore.WHITE + Style.BRIGHT}{reward} PTS{Style.RESET_ALL}"
                         )
                     else:
-                        self.log(
-                            f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} Check-In: {Style.RESET_ALL}"
-                            f"{Fore.RED + Style.BRIGHT}Isn't Claimed{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
+                        self.print_message(account, proxy, Fore.RED,
+                            "Daily Check-In Reward Isn't Claimed"
                         )
                 else:
-                    self.log(
-                        f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                        f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                        f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                        f"{Fore.CYAN + Style.BRIGHT} Check-In: {Style.RESET_ALL}"
-                        f"{Fore.YELLOW + Style.BRIGHT}Is Already Claimed{Style.RESET_ALL}"
-                        f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
+                    self.print_message(account, proxy, Fore.YELLOW,
+                        "Daily Check-In Reward Is Already Claimed"
                     )
-            else:
-                self.log(
-                    f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} Check-In: {Style.RESET_ALL}"
-                    f"{Fore.RED + Style.BRIGHT}GET Data Failed{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-                )
             await asyncio.sleep(24 * 60 * 60)
 
-    async def process_claim_tier(self, account: str, token: str, proxy=None):
+    async def process_claim_tier_reward(self, account: str, token: str, use_proxy: bool):
         while True:
-            tiers = await self.tier_details(account, token, proxy)
+            proxy = self.get_next_proxy_for_account(account) if use_proxy else None
+            tiers = await self.tier_details(account, token, use_proxy, proxy)
             if tiers:
-                completed = False
                 for tier in tiers:
                     tier_id = tier['id']
                     tier_name = tier['name']
@@ -447,230 +448,119 @@ class OepnLedger:
                     is_claimed = tier['claimStatus']
 
                     if tier and not is_claimed:
-                        claim = await self.claim_tier(account, token, tier_id, proxy)
-                        if claim and claim['status'] == 'SUCCESS':
-                            self.log(
-                                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT} Tier: {Style.RESET_ALL}"
-                                f"{Fore.WHITE + Style.BRIGHT}{tier_name}{Style.RESET_ALL}"
-                                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT}Status:{Style.RESET_ALL}"
+                        claim = await self.claim_tier_reward(account, token, tier_id, use_proxy, proxy)
+
+                        if "status" in claim and claim['status'] == "SUCCESS":
+                            self.print_message(account, proxy, Fore.WHITE,
+                                f"Tier {tier_name}"
                                 f"{Fore.GREEN + Style.BRIGHT} Is Claimed {Style.RESET_ALL}"
                                 f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
                                 f"{Fore.CYAN + Style.BRIGHT} Reward: {Style.RESET_ALL}"
                                 f"{Fore.WHITE + Style.BRIGHT}{reward} PTS{Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
                             )
                         else:
-                            self.log(
-                                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT} Tier: {Style.RESET_ALL}"
-                                f"{Fore.WHITE + Style.BRIGHT}{tier_name}{Style.RESET_ALL}"
-                                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT}Status:{Style.RESET_ALL}"
-                                f"{Fore.YELLOW + Style.BRIGHT} Not ELigible to Claim {Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT}]{Style.RESET_ALL}"
+                            self.print_message(account, proxy, Fore.WHITE,
+                                f"Tier {tier_name} "
+                                f"{Fore.YELLOW + Style.BRIGHT}Not Eligible To Claim{Style.RESET_ALL}"
                             )
-                        await asyncio.sleep(1)
-                    
-                    else:
-                        completed = True
 
-                if completed:
-                    self.log(
-                        f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                        f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                        f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                        f"{Fore.CYAN + Style.BRIGHT} Tier: {Style.RESET_ALL}"
-                        f"{Fore.GREEN + Style.BRIGHT}All Available Tier Is Completed{Style.RESET_ALL}"
-                        f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-                    )
-            else:
-                self.log(
-                    f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} Tier: {Style.RESET_ALL}"
-                    f"{Fore.RED + Style.BRIGHT}GET Data Failed{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-                )
+                        await asyncio.sleep(3)
+
             await asyncio.sleep(24 * 60 * 60)
-                
-    async def send_register_msg(self, wss, account: str, id: str, identity: str, proxy=None):
-        try:
-            register_message = {
-                "workerID": identity,
-                "msgType": "REGISTER",
-                "workerType": "LWEXT",
-                "message": {
-                    "id": id,
-                    "type": "REGISTER",
-                    "worker": {
-                    "host": self.extension_id,
-                    "identity": identity,
-                    "ownerAddress": account,
-                    "type": "LWEXT"
-                    }
+
+    async def send_register_message(self, wss, account: str, identity: str, random_id: str, proxy=None):
+        register_message = {
+            "workerID": identity,
+            "msgType": "REGISTER",
+            "workerType": "LWEXT",
+            "message": {
+                "id": random_id,
+                "type": "REGISTER",
+                "worker": {
+                "host": self.extension_id,
+                "identity": identity,
+                "ownerAddress": account,
+                "type": "LWEXT"
                 }
             }
-
-            await wss.send_json(register_message)
-            return self.log(
-                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                f"{Fore.GREEN + Style.BRIGHT}Register Message Sended{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-            )
-        except Exception as e:
-            return self.log(
-                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                f"{Fore.RED + Style.BRIGHT}Send Register Message Failed{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-            )
-
-    async def send_heartbeat_msg(self, wss, account: str, identity: str, memory: int, storage: str, proxy=None):
-        try:
-            heartbeat_message = {
-                "message": {
-                    "Worker": {
+        }
+        await wss.send_json(register_message)
+        self.print_message(account, proxy, Fore.WHITE, 
+            f"Worker ID {self.mask_account(identity)} "
+            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
+            f"{Fore.CYAN + Style.BRIGHT} Sent Register Message: {Style.RESET_ALL}"
+            f"{Fore.GREEN + Style.BRIGHT}{register_message}{Style.RESET_ALL}"
+        )
+        
+    async def send_heartbeat_message(self, wss, account: str, identity: str, memory: int, storage: str, proxy=None):
+        heartbeat_message = {
+            "message": {
+                "Worker": {
                     "Identity": identity,
                     "ownerAddress": account,
                     "type": "LWEXT",
                     "Host": self.extension_id
-                    },
-                    "Capacity": {
+                },
+                "Capacity": {
                     "AvailableMemory": memory,
                     "AvailableStorage": storage,
                     "AvailableGPU": "",
                     "AvailableModels": []
+                }
+            },
+            "msgType": "HEARTBEAT",
+            "workerType": "LWEXT",
+            "workerID": identity
+        }
+        await wss.send_json(heartbeat_message)
+        self.print_message(account, proxy, Fore.WHITE, 
+            f"Worker ID {self.mask_account(identity)} "
+            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
+            f"{Fore.CYAN + Style.BRIGHT} Sent Heartbeat Message: {Style.RESET_ALL}"
+            f"{Fore.GREEN + Style.BRIGHT}{heartbeat_message}{Style.RESET_ALL}"
+        )
+
+    async def load_websocket_response(self, wss, account: str, identity: str, proxy=None):
+        response = await wss.receive_json()
+        if response:
+            self.print_message(account, proxy, Fore.WHITE, 
+                f"Worker ID {self.mask_account(identity)} "
+                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
+                f"{Fore.CYAN + Style.BRIGHT} Received Message: {Style.RESET_ALL}"
+                f"{Fore.BLUE + Style.BRIGHT}{response}{Style.RESET_ALL}"
+            )
+            
+            if "MsgType" in response and response['MsgType'] == "JOB":
+                job_message = {
+                    "workerID": identity,
+                    "msgType": "JOB_ASSIGNED",
+                    "workerType": "LWEXT",
+                    "message": {
+                        "Status": True,
+                        "Ref": response["UUID"]
                     }
-                },
-                "msgType": "HEARTBEAT",
-                "workerType": "LWEXT",
-                "workerID": identity
-            }
+                }
+                await wss.send_json(job_message)
+                self.print_message(account, proxy, Fore.WHITE, 
+                    f"Worker ID {self.mask_account(identity)} "
+                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.CYAN + Style.BRIGHT} Sent JOB Message: {Style.RESET_ALL}"
+                    f"{Fore.BLUE + Style.BRIGHT}{job_message}{Style.RESET_ALL}"
+                )
+            else:
+                job_message = {
+                    "type": "WEBSOCKET_RESPONSE",
+                    "data": response
+                }
+                await wss.send_json(job_message)
+                self.print_message(account, proxy, Fore.WHITE, 
+                    f"Worker ID {self.mask_account(identity)} "
+                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.CYAN + Style.BRIGHT} Sent JOB Message: {Style.RESET_ALL}"
+                    f"{Fore.BLUE + Style.BRIGHT}{job_message}{Style.RESET_ALL}"
+                )
 
-            await wss.send_json(heartbeat_message)
-            return self.log(
-                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                f"{Fore.GREEN + Style.BRIGHT}Heartbeat Message Sended{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-            )
-        except Exception as e:
-            return self.log(
-                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                f"{Fore.RED + Style.BRIGHT}Send Heartbeat Message Failed{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-            )
-
-    async def load_job_data(self, wss, account, identity, proxy=None):
-        try:
-            async for msg in wss:
-                if isinstance(msg, WSMessage):
-                    message = json.loads(msg.data)
-                    if message.get("MsgType") != "JOB":
-                        response = {
-                            "type": "WEBSOCKET_RESPONSE",
-                            "data": message
-                        }
-                        await wss.send_json(response)
-                        self.log(
-                            f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                            f"{Fore.YELLOW + Style.BRIGHT}Received Message{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {message} {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}]{Style.RESET_ALL}"
-                        )
-                    elif message.get("MsgType") == "JOB":
-                        response = {
-                            "workerID": identity,
-                            "msgType": "JOB_ASSIGNED",
-                            "workerType": "LWEXT",
-                            "message": {
-                                "Status": True,
-                                "Ref": message["UUID"]
-                            }
-                        }
-                        await wss.send_json(response)
-                        self.log(
-                            f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                            f"{Fore.YELLOW + Style.BRIGHT}Received Message{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {message} {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}]{Style.RESET_ALL}"
-                        )
-        except Exception as e:
-            return self.log(
-                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                f"{Fore.RED + Style.BRIGHT}GET Response Message Failed{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-            )
-    
-    async def connect_websocket(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
+    async def connect_websocket(self, account: str, token: str, use_proxy: bool, retries=5):
         wss_url = f"wss://apitn.openledger.xyz/ws/v1/orch?authToken={token}"
         headers = {
             "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -686,189 +576,98 @@ class OepnLedger:
             "Upgrade": "websocket",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         }
-        registered = False
-
-        id = self.generate_id()
+        random_id = self.generate_random_id()
         identity = self.generate_worker_id(account)
         memory = round(random.uniform(0, 32), 2)
         storage = str(round(random.uniform(0, 500), 2))
+        connected = False
 
         while True:
+            proxy = self.get_next_proxy_for_account(account) if use_proxy else None
             connector = ProxyConnector.from_url(proxy) if proxy else None
-            session = ClientSession(connector=connector, timeout=ClientTimeout(total=60))
-
-            try:
-                for attempt in range(retries):
-                    try:
+            for attempt in range(retries):
+                session = ClientSession(connector=connector, timeout=ClientTimeout(total=120))
+                try:
+                    async with session:
                         async with session.ws_connect(wss_url, headers=headers) as wss:
-                            self.log(
-                                f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                                f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                                f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                                f"{Fore.GREEN + Style.BRIGHT}Webscoket Is Connected{Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
+                            self.print_message(account, proxy, Fore.WHITE, 
+                                f"Worker ID {self.mask_account(identity)} "
+                                f"{Fore.GREEN + Style.BRIGHT}Websocket Is Connected{Style.RESET_ALL}"
                             )
-                            
-                            if not registered:
-                                await self.send_register_msg(wss, account, id, identity, proxy)
-                                registered = True
 
-                            async def send_heartbeat():
-                                while not wss.closed:
-                                    await asyncio.sleep(30)
-                                    await self.send_heartbeat_msg(wss, account, identity, memory, storage, proxy)
-
-                            heartbeat_task = asyncio.create_task(send_heartbeat())
-
-                            try:
-                                await self.load_job_data(wss, account, identity, proxy)
-                            except Exception as e:
-                                self.log(
-                                    f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                                    f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                                    f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                                    f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                                    f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                                    f"{Fore.YELLOW + Style.BRIGHT}Webscoket Connection Closed{Style.RESET_ALL}"
-                                    f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-                                )
-                            finally:
-                                if not wss.closed:
-                                    await wss.close()
-                                heartbeat_task.cancel()
+                            while True:
                                 try:
-                                    await heartbeat_task
-                                except asyncio.CancelledError:
-                                    pass
+                                    if not connected:
+                                        await self.send_register_message(wss, account, identity, random_id, proxy)
+                                        await self.load_websocket_response(wss, account, identity, proxy)
+                                        connected = True
 
-                    except Exception as e:
-                        if attempt < retries - 1:
-                            await asyncio.sleep(5)
-                            continue
+                                        await asyncio.sleep(30)
 
-                        self.log(
-                            f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                            f"{Fore.RED + Style.BRIGHT}Webscoket Not Connected{Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-                        )
-                        if use_proxy:
-                            proxy = self.get_next_proxy()
-
-                        registered = False
-
-            except asyncio.CancelledError:
-                self.log(
-                    f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                    f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT}Worker ID:{Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(identity)} {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} Status: {Style.RESET_ALL}"
-                    f"{Fore.YELLOW + Style.BRIGHT}Webscoket Closed{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} ]{Style.RESET_ALL}"
-                )
-                break
-            finally:
-                await session.close()
-        
-    async def question(self):
-        while True:
-            try:
-                print("1. Run With Auto Proxy")
-                print("2. Run With Manual Proxy")
-                print("3. Run Without Proxy")
-                choose = int(input("Choose [1/2/3] -> ").strip())
-
-                if choose in [1, 2, 3]:
-                    proxy_type = (
-                        "With Auto Proxy" if choose == 1 else 
-                        "With Manual Proxy" if choose == 2 else 
-                        "Without Proxy"
+                                    if connected:
+                                        await self.send_heartbeat_message(wss, account, identity, memory, storage, proxy)
+                                        await asyncio.sleep(30)
+                                        
+                                except Exception as e:
+                                    self.print_message(account, proxy, Fore.WHITE, 
+                                        f"Worker ID {self.mask_account(identity)} "
+                                        f"{Fore.YELLOW + Style.BRIGHT}Websocket Connection Closed{Style.RESET_ALL}"
+                                    )
+                                    connected = False
+                                    break
+    
+                except Exception as e:
+                    connected = False
+                    if attempt < retries - 1:
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    self.print_message(account, proxy, Fore.WHITE, 
+                        f"Worker ID {self.mask_account(identity)}"
+                        f"{Fore.RED + Style.BRIGHT} Websocket Not Connected: {Style.RESET_ALL}"
+                        f"{Fore.YELLOW + Style.BRIGHT}{str(e)}{Style.RESET_ALL}"
                     )
-                    print(f"{Fore.GREEN + Style.BRIGHT}Run {proxy_type} Selected.{Style.RESET_ALL}")
-                    await asyncio.sleep(1)
-                    return choose
-                else:
-                    print(f"{Fore.RED + Style.BRIGHT}Please enter either 1, 2 or 3.{Style.RESET_ALL}")
-            except ValueError:
-                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2 or 3).{Style.RESET_ALL}")
+                    
+                    proxy = self.rotate_proxy_for_account(token) if use_proxy else None
+
+                except asyncio.CancelledError:
+                    self.print_message(account, proxy, Fore.WHITE, 
+                        f"Worker ID {self.mask_account(identity)} "
+                        f"{Fore.YELLOW + Style.BRIGHT}Websocket Closed{Style.RESET_ALL}"
+                    )
+                    break
+                finally:
+                    await session.close()
         
-    async def process_accounts(self, account: str, use_proxy: bool):
-        proxy = None
-
-        if use_proxy:
-            proxy = self.get_next_proxy()
-
+    async def get_access_token(self, account: str, use_proxy: bool):
+        proxy = self.get_next_proxy_for_account(account) if use_proxy else None
         token = None
         while token is None:
             token = await self.generate_token(account, proxy)
             if not token:
-                self.log(
-                    f"{Fore.CYAN + Style.BRIGHT}[ Account:{Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT} {self.hide_account(account)} {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} Proxy: {Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT}{proxy}{Style.RESET_ALL}"
-                    f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT}Status:{Style.RESET_ALL}"
-                    f"{Fore.RED + Style.BRIGHT} GET Access Token Failed {Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT}]{Style.RESET_ALL}"
-                )
-
-                if not use_proxy:
-                    return
-                
-                await asyncio.sleep(1)
-
-                print(
-                    f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
-                    f"{Fore.YELLOW + Style.BRIGHT}Try With Next Proxy...{Style.RESET_ALL}",
-                    end="\r",
-                    flush=True
-                )
-
-                proxy = self.get_next_proxy()
+                proxy = self.rotate_proxy_for_account(account) if use_proxy else None
                 continue
 
-            await asyncio.gather(
-                self.user_earning(account, token, proxy),
-                self.process_checkin(account, token, proxy),
-                self.process_claim_tier(account, token, proxy),
-                self.connect_websocket(account, token, use_proxy, proxy)
-            )
-    
+            self.print_message(account, proxy, Fore.GREEN, "GET Access Token Success")
+            return token
+        
+    async def process_accounts(self, account: str, use_proxy: bool):
+        token = await self.get_access_token(account, use_proxy)
+        if token:
+
+            tasks = []
+            tasks.append(self.process_user_earning(account, token, use_proxy))
+            tasks.append(self.process_claim_checkin_reward(account, token, use_proxy))
+            tasks.append(self.process_claim_tier_reward(account, token, use_proxy))
+            tasks.append(self.connect_websocket(account, token, use_proxy))
+            await asyncio.gather(*tasks)
+
     async def main(self):
         try:
             with open('accounts.txt', 'r') as file:
                 accounts = [line.strip() for line in file if line.strip()]
-
-            use_proxy_choice = await self.question()
+            
+            use_proxy_choice = self.print_question()
 
             use_proxy = False
             if use_proxy_choice in [1, 2]:
@@ -880,17 +679,15 @@ class OepnLedger:
                 f"{Fore.GREEN + Style.BRIGHT}Account's Total: {Style.RESET_ALL}"
                 f"{Fore.WHITE + Style.BRIGHT}{len(accounts)}{Style.RESET_ALL}"
             )
+
+            if use_proxy:
+                await self.load_proxies(use_proxy_choice)
+
             self.log(f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"*75)
 
-            if use_proxy and use_proxy_choice == 1:
-                await self.load_auto_proxies()
-            elif use_proxy and use_proxy_choice == 2:
-                await self.load_manual_proxy()
-            
             while True:
                 tasks = []
                 for account in accounts:
-                    account = account.strip()
                     if account:
                         tasks.append(self.process_accounts(account, use_proxy))
 
@@ -899,6 +696,7 @@ class OepnLedger:
 
         except Exception as e:
             self.log(f"{Fore.RED+Style.BRIGHT}Error: {e}{Style.RESET_ALL}")
+            raise e
 
 if __name__ == "__main__":
     try:
@@ -908,5 +706,5 @@ if __name__ == "__main__":
         print(
             f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
             f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
-            f"{Fore.RED + Style.BRIGHT}[ EXIT ] Oepn Ledger - BOT{Style.RESET_ALL}                                       "                              
+            f"{Fore.RED + Style.BRIGHT}[ EXIT ] Open Ledger - BOT{Style.RESET_ALL}                                       "                              
         )

@@ -7,12 +7,17 @@ Open Ledger BOT
 ## Features
 
   - Auto Get Account Information
-  - Auto Run With Auto Proxy if u Choose 1 [Use [Monosans Proxy](https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt)]
-  - Auto Run With Manual Proxy if u Choose 2 [Paste Ur personal proxy in manual_proxy.txt]
-  - Auto Claim Daily Check-In
+  - Auto Run With [Monosans](https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt) Proxy - Choose 1
+  - Auto Run With Private Proxy - Choose 2
+  - Auto Run Without Proxy - Choose 3
+  - Auto Claim Daily Check-In Reward
   - Auto Claim Tier Reward
-  - Auto Send Heartbeat Every 30 Seconds
+  - Auto Connect and Reconnect Websocket
+  - Auto Send Heartbeat Message Every 30 Seconds
+  - Auto Rotate Proxy While Get Access Token Failed
   - Multi Accounts With Threads
+
+Note: IPs in several countries are still banned by Openledger, so please be patient when you fail to get an access token.
 
 ## Requiremnets
 
@@ -41,7 +46,7 @@ Open Ledger BOT
   your_address_2
   ```
 
-- **manual_proxy.txt:** You will find the file `manual_proxy.txt` inside the project directory. Make sure `manual_proxy.txt` contains data that matches the format expected by the script. Here are examples of file formats:
+- **proxy.txt:** You will find the file `proxy.txt` inside the project directory. Make sure `proxy.txt` contains data that matches the format expected by the script. Here are examples of file formats:
   ```bash
     ip:port # Default Protcol HTTP.
     protocol://ip:port
