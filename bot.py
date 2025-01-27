@@ -419,7 +419,7 @@ class OepnLedger:
                 if not is_claimed:
                     claim = await self.claim_checkin_reward(account, token, use_proxy, proxy)
 
-                    if "claimed" in claim and claim['claimed']:
+                    if claim and claim['claimed']:
                         self.print_message(account, proxy, Fore.GREEN,
                             f"Daily Check-In Reward Is Claimed "
                             f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
@@ -450,7 +450,7 @@ class OepnLedger:
                     if tier and not is_claimed:
                         claim = await self.claim_tier_reward(account, token, tier_id, use_proxy, proxy)
 
-                        if "status" in claim and claim['status'] == "SUCCESS":
+                        if claim and claim['status'] == "SUCCESS":
                             self.print_message(account, proxy, Fore.WHITE,
                                 f"Tier {tier_name}"
                                 f"{Fore.GREEN + Style.BRIGHT} Is Claimed {Style.RESET_ALL}"
@@ -530,7 +530,7 @@ class OepnLedger:
                 f"{Fore.BLUE + Style.BRIGHT}{response}{Style.RESET_ALL}"
             )
             
-            if "MsgType" in response and response['MsgType'] == "JOB":
+            if response.get('msgType') == "JOB":
                 job_message = {
                     "workerID": identity,
                     "msgType": "JOB_ASSIGNED",
