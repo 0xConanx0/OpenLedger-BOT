@@ -360,7 +360,7 @@ class OepnLedger:
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         elif response.status == 420:
-                            return {"status":"FAILED"}
+                            return None
                         
                         response.raise_for_status()
                         return await response.json()
@@ -468,99 +468,7 @@ class OepnLedger:
 
             await asyncio.sleep(24 * 60 * 60)
 
-    async def send_register_message(self, wss, account: str, identity: str, random_id: str, proxy=None):
-        register_message = {
-            "workerID": identity,
-            "msgType": "REGISTER",
-            "workerType": "LWEXT",
-            "message": {
-                "id": random_id,
-                "type": "REGISTER",
-                "worker": {
-                "host": self.extension_id,
-                "identity": identity,
-                "ownerAddress": account,
-                "type": "LWEXT"
-                }
-            }
-        }
-        await wss.send_json(register_message)
-        self.print_message(account, proxy, Fore.WHITE, 
-            f"Worker ID {self.mask_account(identity)} "
-            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-            f"{Fore.CYAN + Style.BRIGHT} Sent Register Message: {Style.RESET_ALL}"
-            f"{Fore.GREEN + Style.BRIGHT}{register_message}{Style.RESET_ALL}"
-        )
-        
-    async def send_heartbeat_message(self, wss, account: str, identity: str, memory: int, storage: str, proxy=None):
-        heartbeat_message = {
-            "message": {
-                "Worker": {
-                    "Identity": identity,
-                    "ownerAddress": account,
-                    "type": "LWEXT",
-                    "Host": self.extension_id
-                },
-                "Capacity": {
-                    "AvailableMemory": memory,
-                    "AvailableStorage": storage,
-                    "AvailableGPU": "",
-                    "AvailableModels": []
-                }
-            },
-            "msgType": "HEARTBEAT",
-            "workerType": "LWEXT",
-            "workerID": identity
-        }
-        await wss.send_json(heartbeat_message)
-        self.print_message(account, proxy, Fore.WHITE, 
-            f"Worker ID {self.mask_account(identity)} "
-            f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-            f"{Fore.CYAN + Style.BRIGHT} Sent Heartbeat Message: {Style.RESET_ALL}"
-            f"{Fore.GREEN + Style.BRIGHT}{heartbeat_message}{Style.RESET_ALL}"
-        )
-
-    async def load_websocket_response(self, wss, account: str, identity: str, proxy=None):
-        response = await wss.receive_json()
-        if response:
-            self.print_message(account, proxy, Fore.WHITE, 
-                f"Worker ID {self.mask_account(identity)} "
-                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.CYAN + Style.BRIGHT} Received Message: {Style.RESET_ALL}"
-                f"{Fore.BLUE + Style.BRIGHT}{response}{Style.RESET_ALL}"
-            )
-            
-            if response.get('msgType') == "JOB":
-                job_message = {
-                    "workerID": identity,
-                    "msgType": "JOB_ASSIGNED",
-                    "workerType": "LWEXT",
-                    "message": {
-                        "Status": True,
-                        "Ref": response["UUID"]
-                    }
-                }
-                await wss.send_json(job_message)
-                self.print_message(account, proxy, Fore.WHITE, 
-                    f"Worker ID {self.mask_account(identity)} "
-                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} Sent JOB Message: {Style.RESET_ALL}"
-                    f"{Fore.BLUE + Style.BRIGHT}{job_message}{Style.RESET_ALL}"
-                )
-            else:
-                job_message = {
-                    "type": "WEBSOCKET_RESPONSE",
-                    "data": response
-                }
-                await wss.send_json(job_message)
-                self.print_message(account, proxy, Fore.WHITE, 
-                    f"Worker ID {self.mask_account(identity)} "
-                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.CYAN + Style.BRIGHT} Sent JOB Message: {Style.RESET_ALL}"
-                    f"{Fore.BLUE + Style.BRIGHT}{job_message}{Style.RESET_ALL}"
-                )
-
-    async def connect_websocket(self, account: str, token: str, use_proxy: bool, retries=5):
+    async def connect_websocket(self, account: str, token: str, use_proxy: bool):
         wss_url = f"wss://apitn.openledger.xyz/ws/v1/orch?authToken={token}"
         headers = {
             "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -585,59 +493,128 @@ class OepnLedger:
         while True:
             proxy = self.get_next_proxy_for_account(account) if use_proxy else None
             connector = ProxyConnector.from_url(proxy) if proxy else None
-            for attempt in range(retries):
-                session = ClientSession(connector=connector, timeout=ClientTimeout(total=120))
-                try:
-                    async with session:
-                        async with session.ws_connect(wss_url, headers=headers) as wss:
+            session = ClientSession(connector=connector, timeout=ClientTimeout(total=120))
+            try:
+                async with session.ws_connect(wss_url, headers=headers) as wss:
+
+                    async def send_heartbeat():
+                        while True:
+                            heartbeat_message = {
+                                "message": {
+                                    "Worker": {
+                                        "Identity": identity,
+                                        "ownerAddress": account,
+                                        "type": "LWEXT",
+                                        "Host": self.extension_id
+                                    },
+                                    "Capacity": {
+                                        "AvailableMemory": memory,
+                                        "AvailableStorage": storage,
+                                        "AvailableGPU": "",
+                                        "AvailableModels": []
+                                    }
+                                },
+                                "msgType": "HEARTBEAT",
+                                "workerType": "LWEXT",
+                                "workerID": identity
+                            }
+                            await wss.send_json(heartbeat_message)
                             self.print_message(account, proxy, Fore.WHITE, 
-                                f"Worker ID {self.mask_account(identity)} "
-                                f"{Fore.GREEN + Style.BRIGHT}Websocket Is Connected{Style.RESET_ALL}"
+                                f"Worker ID {self.mask_account(identity)}"
+                                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
+                                f"{Fore.GREEN + Style.BRIGHT}Sent Heartbeat Success{Style.RESET_ALL}"
                             )
+                            await asyncio.sleep(30)
 
-                            while True:
+                    if not connected:
+                        register_message = {
+                            "workerID": identity,
+                            "msgType": "REGISTER",
+                            "workerType": "LWEXT",
+                            "message": {
+                                "id": random_id,
+                                "type": "REGISTER",
+                                "worker": {
+                                "host": self.extension_id,
+                                "identity": identity,
+                                "ownerAddress": account,
+                                "type": "LWEXT"
+                                }
+                            }
+                        }
+                        await wss.send_json(register_message)
+                        self.print_message(account, proxy, Fore.WHITE, 
+                            f"Worker ID {self.mask_account(identity)}"
+                            f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
+                            f"{Fore.GREEN + Style.BRIGHT}Websocket Is Connected{Style.RESET_ALL}"
+                        )
+                        connected = True
+                        await asyncio.sleep(30)
+
+                    if connected:
+                        send_ping = asyncio.create_task(send_heartbeat())
+                        try:
+                            async for msg in wss:
+                                response = json.loads(msg.data)
+                                self.print_message(account, proxy, Fore.WHITE, 
+                                    f"Worker ID {self.mask_account(identity)} "
+                                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
+                                    f"{Fore.GREEN + Style.BRIGHT} Received Message: {Style.RESET_ALL}"
+                                    f"{Fore.BLUE + Style.BRIGHT}{response}{Style.RESET_ALL}"
+                                )
+                                if response.get("msgType") == "JOB":
+                                    job_message = {
+                                        "workerID": identity,
+                                        "msgType": "JOB_ASSIGNED",
+                                        "workerType": "LWEXT",
+                                        "message": {
+                                            "Status": True,
+                                            "Ref": response["UUID"]
+                                        }
+                                    }
+                                    await wss.send_json(job_message)
+                                elif response.get("msgType") != "JOB":
+                                    job_message = {
+                                        "type": "WEBSOCKET_RESPONSE",
+                                        "data": response
+                                    }
+                                    await wss.send_json(job_message)
+
+                        except Exception as e:
+                            if send_ping:
+                                send_ping.cancel()
                                 try:
-                                    if not connected:
-                                        await self.send_register_message(wss, account, identity, random_id, proxy)
-                                        await self.load_websocket_response(wss, account, identity, proxy)
-                                        connected = True
-
-                                        await asyncio.sleep(30)
-
-                                    if connected:
-                                        await self.send_heartbeat_message(wss, account, identity, memory, storage, proxy)
-                                        await asyncio.sleep(30)
-                                        
-                                except Exception as e:
+                                    await send_ping
+                                except asyncio.CancelledError:
                                     self.print_message(account, proxy, Fore.WHITE, 
-                                        f"Worker ID {self.mask_account(identity)} "
+                                        f"Worker ID {self.mask_account(identity)}"
+                                        f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
                                         f"{Fore.YELLOW + Style.BRIGHT}Websocket Connection Closed{Style.RESET_ALL}"
                                     )
-                                    connected = False
-                                    break
-    
-                except Exception as e:
-                    connected = False
-                    if attempt < retries - 1:
-                        await asyncio.sleep(5)
-                        continue
-                    
-                    self.print_message(account, proxy, Fore.WHITE, 
-                        f"Worker ID {self.mask_account(identity)}"
-                        f"{Fore.RED + Style.BRIGHT} Websocket Not Connected: {Style.RESET_ALL}"
-                        f"{Fore.YELLOW + Style.BRIGHT}{str(e)}{Style.RESET_ALL}"
-                    )
-                    
-                    proxy = self.rotate_proxy_for_account(token) if use_proxy else None
 
-                except asyncio.CancelledError:
-                    self.print_message(account, proxy, Fore.WHITE, 
-                        f"Worker ID {self.mask_account(identity)} "
-                        f"{Fore.YELLOW + Style.BRIGHT}Websocket Closed{Style.RESET_ALL}"
-                    )
-                    break
-                finally:
-                    await session.close()
+                            connected = False
+                            break
+
+            except Exception as e:
+                self.print_message(account, proxy, Fore.WHITE, 
+                    f"Worker ID {self.mask_account(identity)} "
+                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.RED + Style.BRIGHT} Websocket Not Connected: {Style.RESET_ALL}"
+                    f"{Fore.YELLOW + Style.BRIGHT}{str(e)}{Style.RESET_ALL}"
+                )
+                
+                proxy = self.rotate_proxy_for_account(account) if use_proxy else None
+                await asyncio.sleep(5)
+
+            except asyncio.CancelledError:
+                self.print_message(account, proxy, Fore.WHITE, 
+                    f"Worker ID {self.mask_account(identity)}"
+                    f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
+                    f"{Fore.YELLOW + Style.BRIGHT}Websocket Closed{Style.RESET_ALL}"
+                )
+                break
+            finally:
+                await session.close()
         
     async def get_access_token(self, account: str, use_proxy: bool):
         proxy = self.get_next_proxy_for_account(account) if use_proxy else None
@@ -654,7 +631,6 @@ class OepnLedger:
     async def process_accounts(self, account: str, use_proxy: bool):
         token = await self.get_access_token(account, use_proxy)
         if token:
-
             tasks = []
             tasks.append(self.process_user_earning(account, token, use_proxy))
             tasks.append(self.process_claim_checkin_reward(account, token, use_proxy))
