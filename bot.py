@@ -4,9 +4,9 @@ from aiohttp import (
     ClientTimeout
 )
 from aiohttp_socks import ProxyConnector
-from colorama import *
-from datetime import datetime
 from fake_useragent import FakeUserAgent
+from datetime import datetime
+from colorama import *
 import asyncio, random, base64, uuid, json, os, pytz
 
 wib = pytz.timezone('Asia/Jakarta')
@@ -157,10 +157,7 @@ class OepnLedger:
         url = "https://apitn.openledger.xyz/api/v1/auth/generate_token"
         data = json.dumps({"address":account})
         headers = {
-            **self.headers,
-            "Content-Length": str(len(data)),
             "Content-Type": "application/json"
-
         }
         connector = ProxyConnector.from_url(proxy) if proxy else None
         try:
@@ -172,7 +169,7 @@ class OepnLedger:
         except (Exception, ClientResponseError) as e:
             return self.print_message(account, proxy, Fore.RED, f"GET Access Token Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
         
-    async def user_reward(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
+    async def user_reward(self, account: str, token: str, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/reward"
         headers = {
             **self.headers,
@@ -186,7 +183,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.get_access_token(account, use_proxy)
+                            token = await self.get_access_token(account, proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
 
@@ -200,35 +197,7 @@ class OepnLedger:
                 
                 return self.print_message(account, proxy, Fore.RED, f"GET User Reward Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
                 
-    async def worker_reward(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
-        url = "https://rewardstn.openledger.xyz/api/v1/worker_reward"
-        headers = {
-            **self.headers,
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-
-        }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.get(url=url, headers=headers) as response:
-                        if response.status == 401:
-                            token = await self.get_access_token(account, use_proxy)
-                            headers["Authorization"] = f"Bearer {token}"
-                            continue
-
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data'][0]['point']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(5)
-                    continue
-                
-                return self.print_message(account, proxy, Fore.RED, f"GET Total Heartbeat Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
-
-    async def realtime_reward(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
+    async def realtime_reward(self, account: str, token: str, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/reward_realtime"
         headers = {
             **self.headers,
@@ -242,7 +211,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.get_access_token(account, use_proxy)
+                            token = await self.get_access_token(account, proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
 
@@ -256,7 +225,7 @@ class OepnLedger:
                 
                 return self.print_message(account, proxy, Fore.RED, f"GET Today Heartbeat Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
     
-    async def checkin_details(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
+    async def checkin_details(self, account: str, token: str, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/claim_details"
         headers = {
             **self.headers,
@@ -270,7 +239,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.get_access_token(account, use_proxy)
+                            token = await self.get_access_token(account, proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         
@@ -284,7 +253,7 @@ class OepnLedger:
                 
                 return self.print_message(account, proxy, Fore.RED, f"GET Daily Check-In Data Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
     
-    async def claim_checkin_reward(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
+    async def claim_checkin_reward(self, account: str, token: str, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/claim_reward"
         headers = {
             **self.headers,
@@ -298,7 +267,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.get_access_token(account, use_proxy)
+                            token = await self.get_access_token(account, proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         
@@ -312,7 +281,7 @@ class OepnLedger:
                 
                 return self.print_message(account, proxy, Fore.RED, f"Claim Daily Check-In Reward Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
     
-    async def tier_details(self, account: str, token: str, use_proxy: bool, proxy=None, retries=5):
+    async def tier_details(self, account: str, token: str, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/tier_details"
         headers = {
             **self.headers,
@@ -326,7 +295,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.get(url=url, headers=headers) as response:
                         if response.status == 401:
-                            token = await self.get_access_token(account, use_proxy)
+                            token = await self.get_access_token(account, proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         
@@ -340,7 +309,7 @@ class OepnLedger:
                 
                 return self.print_message(account, proxy, Fore.RED, f"GET Tier Data Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
     
-    async def claim_tier_reward(self, account: str, token: str, tier_id: int, use_proxy: bool, proxy=None, retries=5):
+    async def claim_tier_reward(self, account: str, token: str, tier_id: int, proxy=None, retries=5):
         url = "https://rewardstn.openledger.xyz/api/v1/claim_tier"
         data = json.dumps({"tierId":tier_id})
         headers = {
@@ -356,7 +325,7 @@ class OepnLedger:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.put(url=url, headers=headers, data=data) as response:
                         if response.status == 401:
-                            token = await self.get_access_token(account, use_proxy)
+                            token = await self.get_access_token(account, proxy)
                             headers["Authorization"] = f"Bearer {token}"
                             continue
                         elif response.status == 420:
@@ -375,49 +344,40 @@ class OepnLedger:
         while True:
             proxy = self.get_next_proxy_for_account(account) if use_proxy else None
 
-            epoch_name = "N/A"
-            user_point = 0
-            total_heartbeat = 0
+            epoch_name = "Epoch N/A"
+            total_point = 0
             today_heartbeat = 0
 
-            user = await self.user_reward(account, token, use_proxy, proxy)
+            user = await self.user_reward(account, token, proxy)
             if user:
-                epoch_name = user.get('name', 'N/A')
-                user_point = float(user.get('totalPoint', 0))
+                epoch_name = user.get('name', 'Epoch N/A')
+                total_point = float(user.get('totalPoint', 0))
             await asyncio.sleep(3)
 
-            worker_reward = await self.worker_reward(account, token, use_proxy, proxy)
-            if worker_reward:
-                total_heartbeat = float(worker_reward)
-            await asyncio.sleep(3)
-
-            realtime_reward = await self.realtime_reward(account, token, use_proxy, proxy)
+            realtime_reward = await self.realtime_reward(account, token, proxy)
             if realtime_reward:
                 today_heartbeat = float(realtime_reward)
             await asyncio.sleep(3)
 
-            total_earning = user_point + total_heartbeat
-            today_earning = today_heartbeat
-
             self.print_message(account, proxy, Fore.WHITE,
                 f"Earning {epoch_name}"
                 f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}Today {today_earning} PTS{Style.RESET_ALL}"
+                f"{Fore.WHITE + Style.BRIGHT}Today {today_heartbeat} PTS{Style.RESET_ALL}"
                 f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}Total {total_earning} PTS{Style.RESET_ALL}"
+                f"{Fore.WHITE + Style.BRIGHT}Total {total_point} PTS{Style.RESET_ALL}"
             )
             await asyncio.sleep(15 * 60)
 
     async def process_claim_checkin_reward(self, account: str, token: str, use_proxy: bool):
         while True:
             proxy = self.get_next_proxy_for_account(account) if use_proxy else None
-            checkin = await self.checkin_details(account, token, use_proxy, proxy)
+            checkin = await self.checkin_details(account, token, proxy)
             if checkin:
                 is_claimed = checkin['claimed']
                 reward = checkin['dailyPoint']
 
                 if not is_claimed:
-                    claim = await self.claim_checkin_reward(account, token, use_proxy, proxy)
+                    claim = await self.claim_checkin_reward(account, token, proxy)
 
                     if claim and claim['claimed']:
                         self.print_message(account, proxy, Fore.GREEN,
@@ -434,12 +394,12 @@ class OepnLedger:
                     self.print_message(account, proxy, Fore.YELLOW,
                         "Daily Check-In Reward Is Already Claimed"
                     )
-            await asyncio.sleep(24 * 60 * 60)
+            await asyncio.sleep(12 * 60 * 60)
 
     async def process_claim_tier_reward(self, account: str, token: str, use_proxy: bool):
         while True:
             proxy = self.get_next_proxy_for_account(account) if use_proxy else None
-            tiers = await self.tier_details(account, token, use_proxy, proxy)
+            tiers = await self.tier_details(account, token, proxy)
             if tiers:
                 for tier in tiers:
                     tier_id = tier['id']
@@ -448,7 +408,7 @@ class OepnLedger:
                     is_claimed = tier['claimStatus']
 
                     if tier and not is_claimed:
-                        claim = await self.claim_tier_reward(account, token, tier_id, use_proxy, proxy)
+                        claim = await self.claim_tier_reward(account, token, tier_id, proxy)
 
                         if claim and claim['status'] == "SUCCESS":
                             self.print_message(account, proxy, Fore.WHITE,
@@ -484,20 +444,19 @@ class OepnLedger:
             "Upgrade": "websocket",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         }
-        random_id = self.generate_random_id()
+        connected = False
+        
         identity = self.generate_worker_id(account)
         memory = round(random.uniform(0, 32), 2)
         storage = str(round(random.uniform(0, 500), 2))
-        connected = False
 
         while True:
             proxy = self.get_next_proxy_for_account(account) if use_proxy else None
             connector = ProxyConnector.from_url(proxy) if proxy else None
-            session = ClientSession(connector=connector, timeout=ClientTimeout(total=120))
+            session = ClientSession(connector=connector, timeout=ClientTimeout(total=60))
             try:
                 async with session.ws_connect(wss_url, headers=headers) as wss:
-
-                    async def send_heartbeat():
+                    async def send_heartbeat_message():
                         while True:
                             heartbeat_message = {
                                 "message": {
@@ -518,13 +477,13 @@ class OepnLedger:
                                 "workerType": "LWEXT",
                                 "workerID": identity
                             }
+                            await asyncio.sleep(30)
                             await wss.send_json(heartbeat_message)
                             self.print_message(account, proxy, Fore.WHITE, 
                                 f"Worker ID {self.mask_account(identity)}"
                                 f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
                                 f"{Fore.GREEN + Style.BRIGHT}Sent Heartbeat Success{Style.RESET_ALL}"
                             )
-                            await asyncio.sleep(30)
 
                     if not connected:
                         register_message = {
@@ -532,13 +491,13 @@ class OepnLedger:
                             "msgType": "REGISTER",
                             "workerType": "LWEXT",
                             "message": {
-                                "id": random_id,
+                                "id": self.generate_random_id(),
                                 "type": "REGISTER",
                                 "worker": {
-                                "host": self.extension_id,
-                                "identity": identity,
-                                "ownerAddress": account,
-                                "type": "LWEXT"
+                                    "host": self.extension_id,
+                                    "identity": identity,
+                                    "ownerAddress": account,
+                                    "type": "LWEXT"
                                 }
                             }
                         }
@@ -549,38 +508,26 @@ class OepnLedger:
                             f"{Fore.GREEN + Style.BRIGHT}Websocket Is Connected{Style.RESET_ALL}"
                         )
                         connected = True
-                        await asyncio.sleep(30)
+                        send_ping = asyncio.create_task(send_heartbeat_message())
 
-                    if connected:
-                        send_ping = asyncio.create_task(send_heartbeat())
+                    while connected:
                         try:
-                            async for msg in wss:
-                                response = json.loads(msg.data)
+                            response = await wss.receive_json()
+                            if response.get("status", False):
                                 self.print_message(account, proxy, Fore.WHITE, 
                                     f"Worker ID {self.mask_account(identity)} "
                                     f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
                                     f"{Fore.GREEN + Style.BRIGHT} Received Message: {Style.RESET_ALL}"
                                     f"{Fore.BLUE + Style.BRIGHT}{response}{Style.RESET_ALL}"
                                 )
-                                if response.get("msgType") == "JOB":
-                                    job_message = {
-                                        "workerID": identity,
-                                        "msgType": "JOB_ASSIGNED",
-                                        "workerType": "LWEXT",
-                                        "message": {
-                                            "Status": True,
-                                            "Ref": response["UUID"]
-                                        }
-                                    }
-                                    await wss.send_json(job_message)
-                                elif response.get("msgType") != "JOB":
-                                    job_message = {
-                                        "type": "WEBSOCKET_RESPONSE",
-                                        "data": response
-                                    }
-                                    await wss.send_json(job_message)
 
                         except Exception as e:
+                            self.print_message(account, proxy, Fore.WHITE, 
+                                f"Worker ID {self.mask_account(identity)} "
+                                f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
+                                f"{Fore.RED + Style.BRIGHT} Websocket Connection Closed: {Style.RESET_ALL}"
+                                f"{Fore.YELLOW + Style.BRIGHT}{str(e)}{Style.RESET_ALL}"
+                            )
                             if send_ping:
                                 send_ping.cancel()
                                 try:
@@ -589,9 +536,10 @@ class OepnLedger:
                                     self.print_message(account, proxy, Fore.WHITE, 
                                         f"Worker ID {self.mask_account(identity)}"
                                         f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                                        f"{Fore.YELLOW + Style.BRIGHT}Websocket Connection Closed{Style.RESET_ALL}"
+                                        f"{Fore.YELLOW + Style.BRIGHT}Sent Heartbeat Cancelled{Style.RESET_ALL}"
                                     )
 
+                            await asyncio.sleep(5)
                             connected = False
                             break
 
@@ -602,7 +550,7 @@ class OepnLedger:
                     f"{Fore.RED + Style.BRIGHT} Websocket Not Connected: {Style.RESET_ALL}"
                     f"{Fore.YELLOW + Style.BRIGHT}{str(e)}{Style.RESET_ALL}"
                 )
-                
+
                 proxy = self.rotate_proxy_for_account(account) if use_proxy else None
                 await asyncio.sleep(5)
 
