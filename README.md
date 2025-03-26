@@ -10,14 +10,8 @@ Open Ledger BOT
   - Auto Run With [Monosans](https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt) Proxy - Choose 1
   - Auto Run With Private Proxy - Choose 2
   - Auto Run Without Proxy - Choose 3
-  - Auto Claim Daily Check-In Reward
-  - Auto Claim Tier Reward
-  - Auto Connect and Reconnect Websocket
-  - Auto Send Heartbeat Message Every 30 Seconds
-  - Auto Rotate Proxy While Get Access Token Failed
+  - Auto Register & Send Heartbeat
   - Multi Accounts With Threads
-
-Note: IPs in several countries are still banned by Openledger, so please be patient when you fail to get an access token.
 
 ## Requiremnets
 
@@ -40,10 +34,18 @@ Note: IPs in several countries are still banned by Openledger, so please be pati
 
 ## Configuration
 
-- **accounts.txt:** You will find the file `accounts.txt` inside the project directory. Make sure `accounts.txt` contains data that matches the format expected by the script. Here are examples of file formats:
+- **accounts.json:** You will find the file `accounts.json` inside the project directory. Make sure `accounts.json` contains data that matches the format expected by the script. Here are examples of file formats:
   ```bash
-  your_address_1
-  your_address_2
+    [
+        {
+            "Address": "your_address_1",
+            "Access_Token": "your_access_token_1"
+        },
+        {
+            "Address": "your_address_2",
+            "Access_Token": "your_access_token_2"
+        }
+    ]
   ```
 
 - **proxy.txt:** You will find the file `proxy.txt` inside the project directory. Make sure `proxy.txt` contains data that matches the format expected by the script. Here are examples of file formats:
