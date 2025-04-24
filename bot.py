@@ -1,4 +1,9 @@
-from curl_cffi import requests
+from aiohttp import (
+    ClientResponseError,
+    ClientSession,
+    ClientTimeout
+)
+from aiohttp_socks import ProxyConnector
 from fake_useragent import FakeUserAgent
 from datetime import datetime
 from colorama import *
@@ -8,17 +13,19 @@ wib = pytz.timezone('Asia/Jakarta')
 
 class OepnLedger:
     def __init__(self) -> None:
-        self.extension_id = "chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc"
         self.headers = {
             "Accept": "*/*",
             "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Origin": self.extension_id,
+            "Origin": "chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "none",
             "Sec-Fetch-Storage-Access": "active",
             "User-Agent": FakeUserAgent().random
         }
+        self.EXTENSION_ID = "chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc"
+        self.BROWSER_ID = {}
+        self.WORKER_ID = {}
         self.proxies = []
         self.proxy_index = 0
         self.account_proxies = {}
@@ -67,12 +74,13 @@ class OepnLedger:
         filename = "proxy.txt"
         try:
             if use_proxy_choice == 1:
-                response = await asyncio.to_thread(requests.get, "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt")
-                response.raise_for_status()
-                content = response.text
-                with open(filename, 'w') as f:
-                    f.write(content)
-                self.proxies = content.splitlines()
+                async with ClientSession(timeout=ClientTimeout(total=30)) as session:
+                    async with session.get("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt") as response:
+                        response.raise_for_status()
+                        content = await response.text()
+                        with open(filename, 'w') as f:
+                            f.write(content)
+                        self.proxies = content.splitlines()
             else:
                 if not os.path.exists(filename):
                     self.log(f"{Fore.RED + Style.BRIGHT}File {filename} Not Found.{Style.RESET_ALL}")
@@ -116,17 +124,17 @@ class OepnLedger:
         self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
         return proxy
     
-    def generate_register_message(self, address: str, worker_id: str, browser_id: str, msg_type: str):
+    def generate_register_payload(self, address: str):
         register_message = {
-            "workerID":worker_id,
-            "msgType":msg_type,
+            "workerID":self.WORKER_ID[address],
+            "msgType":"REGISTER",
             "workerType":"LWEXT",
             "message":{
-                "id":browser_id,
-                "type":msg_type,
+                "id":self.BROWSER_ID[address],
+                "type":"REGISTER",
                 "worker":{
-                    "host":self.extension_id,
-                    "identity":worker_id,
+                    "host":self.EXTENSION_ID,
+                    "identity":self.WORKER_ID[address],
                     "ownerAddress":address,
                     "type":"LWEXT"
                 }
@@ -134,26 +142,26 @@ class OepnLedger:
         }
         return register_message
     
-    def generate_heartbeat_message(self, address: str, worker_id: str, msg_type: str, memory: int, storage: str):
+    def generate_heartbeat_payload(self, address: str):
         heartbeat_message = {
             "message":{
                 "Worker":{
-                    "Identity":worker_id,
+                    "Identity":self.WORKER_ID[address],
                     "ownerAddress":address,
                     "type":"LWEXT",
-                    "Host":self.extension_id,
+                    "Host":self.EXTENSION_ID,
                     "pending_jobs_count":0
                 },
                 "Capacity":{
-                    "AvailableMemory":memory,
-                    "AvailableStorage":storage,
+                    "AvailableMemory":round(random.uniform(0, 32), 2),
+                    "AvailableStorage":str(round(random.uniform(0, 500), 2)),
                     "AvailableGPU":"",
                     "AvailableModels":[]
                 }
             },
-            "msgType":msg_type,
+            "msgType":"HEARTBEAT",
             "workerType":"LWEXT",
-            "workerID":worker_id
+            "workerID":self.WORKER_ID[address]
         }
         return heartbeat_message
     
@@ -161,8 +169,8 @@ class OepnLedger:
         browser_id = str(uuid.uuid4())
         return browser_id
         
-    def generate_worker_id(self, account: str):
-        identity = base64.b64encode(account.encode("utf-8")).decode("utf-8")
+    def generate_worker_id(self, adrress: str):
+        identity = base64.b64encode(adrress.encode("utf-8")).decode("utf-8")
         return identity
     
     def mask_account(self, account):
@@ -203,7 +211,7 @@ class OepnLedger:
             except ValueError:
                 print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2 or 3).{Style.RESET_ALL}")
 
-    async def nodes_communicate(self, address: str, token: str, msg_type: str, payload: dict, use_proxy: bool, proxy=None):
+    async def nodes_communicate(self, address: str, token: str, payload: dict, use_proxy: bool, proxy=None, retries=3):
         url = "https://apitn.openledger.xyz/ext/api/v2/nodes/communicate"
         data = json.dumps(payload)
         headers = {
@@ -213,49 +221,58 @@ class OepnLedger:
             "Content-Type": "application/json"
         }
         while True:
-            try:
-                response = await asyncio.to_thread(requests.post, url=url, headers=headers, data=data, proxy=proxy, timeout=60, impersonate="safari15_5")
-                response.raise_for_status()
-                return response.json()
-            except Exception as e:
-                self.print_message(address, proxy, Fore.RED, f"{msg_type} Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
-                proxy = self.rotate_proxy_for_account(address) if use_proxy else None
-                await asyncio.sleep(5)
+            for attempt in range(retries):
+                connector = ProxyConnector.from_url(proxy) if proxy else None
+                try:
+                    async with ClientSession(connector=connector, timeout=ClientTimeout(total=120)) as session:
+                        async with session.post(url=url, headers=headers, data=data, ssl=False) as response:
+                            response.raise_for_status()
+                            return await response.json()
+                except (Exception, ClientResponseError) as e:
+                    if "403" in str(e):
+                        self.print_message(address, proxy, Fore.RED, f"Communicate Failed: {Fore.YELLOW + Style.BRIGHT}Ip Blocked By OpenLedger Server")
+                        await asyncio.sleep(5)
+                    else:
+                        if attempt < retries - 1:
+                            await asyncio.sleep(30)
+                            continue
+                        self.print_message(address, proxy, Fore.RED, f"Communicate Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
+                    proxy = self.rotate_proxy_for_account(address) if use_proxy else None
+                    continue
+        
+    async def process_registering_node(self, address: str, token: str, use_proxy: bool):
+        proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+        payload = self.generate_register_payload(address)
+
+        registered = await self.nodes_communicate(address, token, payload, use_proxy, proxy)
+        if registered:
+            proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+            self.print_message(address, proxy, Fore.GREEN, "Communicate Success" 
+                f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
+                f"{Fore.BLUE + Style.BRIGHT}Node Registered{Style.RESET_ALL}"
+            )
+
+        return True
+        
+    async def process_send_heartbeat(self, address: str, token: str, use_proxy: bool):
+        payload = self.generate_heartbeat_payload(address)
+        while True:
+            proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+
+            heartbeat = await self.nodes_communicate(address, token, payload, use_proxy, proxy)
+            if heartbeat:
+                proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+                self.print_message(address, proxy, Fore.GREEN, "Communicate Success" 
+                    f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
+                    f"{Fore.BLUE + Style.BRIGHT}Heartbeat Sended{Style.RESET_ALL}"
+                )
+
+            await asyncio.sleep(5 * 60)
         
     async def process_accounts(self, address: str, token: str, use_proxy: bool):
-        worker_id = self.generate_worker_id(address)
-        browser_id = self.generate_browser_id()
-        memory = round(random.uniform(0, 32), 2)
-        storage = str(round(random.uniform(0, 500), 2))
-
-        for msg_type in ["REGISTER", "HEARTBEAT"]:
-            if msg_type == "REGISTER":
-                proxy = self.get_next_proxy_for_account(address) if use_proxy else None
-                payload = self.generate_register_message(address, worker_id, browser_id, msg_type)
-                register = await self.nodes_communicate(address, token, msg_type, payload, use_proxy, proxy)
-                if register:
-                    self.print_message(address, proxy, Fore.GREEN, f"{msg_type} Success: {Fore.BLUE + Style.BRIGHT}{register}")
-                print(
-                    f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
-                    f"{Fore.BLUE + Style.BRIGHT}Wait For 5 Minutes For Next Ping...{Style.RESET_ALL}",
-                    end="\r"
-                )
-                await asyncio.sleep(5 * 60)
-            elif msg_type == "HEARTBEAT":
-                payload = self.generate_heartbeat_message(address, worker_id, msg_type, memory, storage)
-                while True:
-                    proxy = self.get_next_proxy_for_account(address) if use_proxy else None
-                    heartbeat = await self.nodes_communicate(address, token, msg_type, payload, use_proxy, proxy)
-                    if heartbeat:
-                        self.print_message(address, proxy, Fore.GREEN, f"{msg_type} Success: {Fore.BLUE + Style.BRIGHT}{heartbeat}")
-                    print(
-                        f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
-                        f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
-                        f"{Fore.BLUE + Style.BRIGHT}Wait For 5 Minutes For Next Ping...{Style.RESET_ALL}",
-                        end="\r"
-                    )
-                    await asyncio.sleep(5 * 60)
+        is_registered = await self.process_registering_node(address, token, use_proxy)
+        if is_registered:
+            await self.process_send_heartbeat(address, token, use_proxy)
 
     async def main(self):
         try:
@@ -287,8 +304,12 @@ class OepnLedger:
                 for account in accounts:
                     if account:
                         address = account["Address"]
-                        token = account["Access_Token"]
+                        token = account["Token"]
+
                         if address and token:
+                            self.WORKER_ID[address] = self.generate_worker_id(address)
+                            self.BROWSER_ID[address] = self.generate_browser_id()
+
                             tasks.append(asyncio.create_task(self.process_accounts(address, token, use_proxy)))
 
                 await asyncio.gather(*tasks)
