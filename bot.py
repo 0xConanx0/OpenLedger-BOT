@@ -304,7 +304,7 @@ class OepnLedger:
                 for account in accounts:
                     if account:
                         address = account["Address"]
-                        token = account["Token"]
+                        token = account["Access_Token"]
 
                         if address and token:
                             self.WORKER_ID[address] = self.generate_worker_id(address)
